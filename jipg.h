@@ -214,10 +214,11 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
 static void jipg_generate_struct_names(Jipg_Value *value, const char *head_struct_name) {
     const char *fmt = NULL;
     char **name = NULL;
-    size_t struct_num = jipg_global_context.name_alloc++;
+    size_t struct_num;
 
     switch (value->kind) {
         case JIPG_KIND_OBJECT: {
+            struct_num = jipg_global_context.name_alloc++;
             fmt = "%s_object%zu";
             name = &value->as_object.struct_name;
 
@@ -226,6 +227,7 @@ static void jipg_generate_struct_names(Jipg_Value *value, const char *head_struc
                 jipg_generate_struct_names(kv->as_object_kv.value, head_struct_name);
         } break;
         case JIPG_KIND_ARRAY: {
+            struct_num = jipg_global_context.name_alloc++;
             fmt = "%s_array%zu";
             name = &value->as_array.struct_name;
 
@@ -240,6 +242,7 @@ static void jipg_generate_struct_names(Jipg_Value *value, const char *head_struc
         *name = JIPG_REALLOC(NULL, n + 1);
         JIPG_ASSERT(*name);
         strcpy(*name, head_struct_name);
+        name[n] = 0;
         return;
     }
 
@@ -248,7 +251,7 @@ static void jipg_generate_struct_names(Jipg_Value *value, const char *head_struc
         int n = snprintf(NULL, 0, fmt, head_struct_name, struct_num);
         *name = JIPG_REALLOC(NULL, n + 1);
         JIPG_ASSERT(*name);
-        snprintf(*name, n, fmt, head_struct_name, struct_num);
+        snprintf(*name, n + 1, fmt, head_struct_name, struct_num);
     }
 }
 
