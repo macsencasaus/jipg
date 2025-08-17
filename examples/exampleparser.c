@@ -1,6 +1,6 @@
-#include "jipg.h"
+#include "../jipg.h"
 
-JIPG_PARSER(person_json_obj,
+JIPG_PARSER(Person,
             JIPG_OBJECT(
                 JIPG_OBJECT_KV("name", JIPG_STRING()),
                 JIPG_OBJECT_KV("age", JIPG_INT()),
