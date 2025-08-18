@@ -81,18 +81,6 @@ struct Jipg_Value {
             int64_t cap;
             Jipg_Value *internal;
         } as_array;
-
-        struct {
-            int64_t cap;
-        } as_string;
-
-        struct {
-            const char *type;
-        } as_int;
-
-        struct {
-            const char *type;
-        } as_float;
     };
 };
 
@@ -146,20 +134,11 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
             value->as_array.internal = va_arg(args, Jipg_Value *);
         } break;
 
-        case JIPG_KIND_STRING: {
-            value->as_string.cap = va_arg(args, int64_t);
-        } break;
-
-        case JIPG_KIND_INT: {
-            value->as_int.type = va_arg(args, char *);
-        } break;
-
-        case JIPG_KIND_FLOAT: {
-            value->as_float.type = va_arg(args, char *);
-        } break;
-
-        case JIPG_KIND_BOOL: {
-        } break;
+        case JIPG_KIND_STRING:
+        case JIPG_KIND_INT:
+        case JIPG_KIND_FLOAT:
+        case JIPG_KIND_BOOL:
+            break;
     }
 
     va_end(args);
@@ -180,20 +159,17 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
 #define JIPG_ARRAY(INTERNAL) JIPG_ARRAY_IMPL(-1, INTERNAL)
 #define JIPG_ARRAY_CAP(INTERNAL, CAP) JIPG_ARRAY_IMPL(CAP, INTERNAL)
 
-#define JIPG_STRING_IMPL(CAP) \
-    new_jipg_value(JIPG_KIND_STRING, CAP)
-#define JIPG_STRING() JIPG_STRING_IMPL(-1)
-#define JIPG_STRING_CAP(CAP) JIPG_STRING_IMPL(CAP)
+#define JIPG_STRING_IMPL() \
+    new_jipg_value(JIPG_KIND_STRING)
+#define JIPG_STRING() JIPG_STRING_IMPL()
 
-#define JIPG_INT_IMPL(INT_TYPE) \
-    new_jipg_value(JIPG_KIND_INT, INT_TYPE)
-#define JIPG_INT() JIPG_INT_IMPL(JIPG_DEFAULT_INT_TYPE)
-#define JIPG_INT_T(INT_TYPE) JIPG_INT_IMPL(INT_TYPE)
+#define JIPG_INT_IMPL() \
+    new_jipg_value(JIPG_KIND_INT)
+#define JIPG_INT() JIPG_INT_IMPL()
 
-#define JIPG_FLOAT_IMPL(FLOAT_TYPE) \
-    new_jipg_value(JIPG_KIND_FLOAT, FLOAT_TYPE)
-#define JIPG_FLOAT() JIPG_FLOAT_IMPL(JIPG_DEFAULT_FLOAT_TYPE)
-#define JIPG_FLOAT_T(FLOAT_TYPE) JIPG_FLOAT_IMPL(FLOAT_TYPE)
+#define JIPG_FLOAT_IMPL() \
+    new_jipg_value(JIPG_KIND_FLOAT)
+#define JIPG_FLOAT() JIPG_FLOAT_IMPL()
 
 #define JIPG_BOOL_IMPL() \
     new_jipg_value(JIPG_KIND_BOOL)
@@ -300,10 +276,10 @@ static void jipg_emit_field_type(FILE *header, Jipg_Value *value) {
             fprintf(header, "char *");
         } break;
         case JIPG_KIND_INT: {
-            fprintf(header, "%s ", value->as_int.type);
+            fprintf(header, "%s ", JIPG_DEFAULT_INT_TYPE);
         } break;
         case JIPG_KIND_FLOAT: {
-            fprintf(header, "%s ", value->as_float.type);
+            fprintf(header, "%s ", JIPG_DEFAULT_FLOAT_TYPE);
         } break;
         case JIPG_KIND_BOOL: {
             fprintf(header, "bool ");
@@ -353,7 +329,7 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
         } break;
 
         // Does not generate types for primitives for now
-        // This means primitives may not be only value
+        // This means primitives may not be the only value
         default: {
         }
     }
