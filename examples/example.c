@@ -9,7 +9,7 @@ int main(void) {
     size_t file_size;
     const char *json = read_file_to_buffer("person.json", &file_size);
 
-    Person p;
+    Person p = {0};
     if (!parse_Person(json, file_size, &p)) {
         return 1;
     }
@@ -24,6 +24,15 @@ int main(void) {
         printf("%s", p.friends.items[i]);
 
         if (i < p.friends.len - 1)
+            printf(", ");
+    }
+    printf("\n");
+
+    printf("Parents: ");
+    for (size_t i = 0; i < p.parents.len; ++i) {
+        printf("%s", p.parents.items[i]);
+
+        if (i < p.parents.len - 1)
             printf(", ");
     }
     printf("\n");

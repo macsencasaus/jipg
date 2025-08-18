@@ -78,7 +78,7 @@ struct Jipg_Value {
 
         struct {
             char *struct_name;
-            int64_t cap;
+            size_t cap;
             Jipg_Value *internal;
         } as_array;
     };
@@ -156,7 +156,7 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
 
 #define JIPG_ARRAY_IMPL(CAP, INTERNAL) \
     new_jipg_value(JIPG_KIND_ARRAY, CAP, INTERNAL)
-#define JIPG_ARRAY(INTERNAL) JIPG_ARRAY_IMPL(-1, INTERNAL)
+#define JIPG_ARRAY(INTERNAL) JIPG_ARRAY_IMPL(0, INTERNAL)
 #define JIPG_ARRAY_CAP(INTERNAL, CAP) JIPG_ARRAY_IMPL(CAP, INTERNAL)
 
 #define JIPG_STRING_IMPL() \
@@ -928,18 +928,34 @@ static void jipg_emit_array_parser(FILE *source, Jipg_Value *array) {
             "        Lexer save = *l;\n"
             "        Token tok = next_token(l);\n"
             "        if (tok.type == TOKEN_TYPE_RBRACKET) break;\n"
-            "        if (tok.type != TOKEN_TYPE_COMMA) *l = save;\n"
-            "        if (res->_cap == res->len) {\n"
-            "            res->_cap = res->_cap ? res->_cap * 2 : 1;\n"
-            "            res->items = realloc(res->items, res->_cap);\n"
-            "            if (res->items == NULL) return false;\n"
-            "        }\n"
+            "        if (tok.type != TOKEN_TYPE_COMMA) *l = save;\n",
+            struct_name, struct_name);
+
+    if (array->as_array.cap) {
+        fprintf(source,
+                "        if (res->_cap == 0) {\n"
+                "            res->_cap = %ld;\n"
+                "            res->items = realloc(NULL, res->_cap);\n"
+                "            if (res->items == NULL) return false;\n"
+                "        }\n"
+                "        if (res->_cap == res->len) return false;\n",
+                array->as_array.cap);
+    } else {
+        fprintf(source,
+                "        if (res->_cap == res->len) {\n"
+                "            res->_cap = res->_cap ? res->_cap * 2 : 1;\n"
+                "            res->items = realloc(res->items, res->_cap);\n"
+                "            if (res->items == NULL) return false;\n"
+                "        }\n");
+    }
+
+    fprintf(source,
             "        if (!parse_%s(l, res->items + res->len++))\n"
             "            return false;\n"
             "    }\n"
             "    return true;\n"
             "}\n",
-            struct_name, struct_name, jipg_value_name(internal));
+            jipg_value_name(internal));
 }
 
 static void jipg_emit_value_parser(FILE *source, Jipg_Value *value) {
