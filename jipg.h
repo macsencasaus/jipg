@@ -161,9 +161,9 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
     new_jipg_value(JIPG_KIND_OBJECT, sizeof((Jipg_Value *[]){__VA_ARGS__}) / sizeof(Jipg_Value *), __VA_ARGS__)
 #define JIPG_OBJECT(...) JIPG_OBJECT_IMPL(__VA_ARGS__)
 
-#define JIPG_OBJECT_KV_IMPL(KEY, VALUE) \
+#define JIPG_KV_IMPL(KEY, VALUE) \
     new_jipg_value(JIPG_KIND_OBJECT_KV, KEY, VALUE)
-#define JIPG_OBJECT_KV(KEY, VALUE) JIPG_OBJECT_KV_IMPL(KEY, VALUE)
+#define JIPG_KV(KEY, VALUE) JIPG_KV_IMPL(KEY, VALUE)
 
 #define JIPG_ARRAY_IMPL(CAP, INTERNAL) \
     new_jipg_value(JIPG_KIND_ARRAY, CAP, INTERNAL)
@@ -199,6 +199,18 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
             (Jipg_Parser){.head_struct_name = #STRUCT_NAME,                     \
                           .value_gen = jipg_##STRUCT_NAME##_gen};               \
     }
+
+#ifdef JIPG_STRIP_PREFIX
+#define OBJECT JIPG_OBJECT
+#define KV JIPG_KV
+#define ARRAY JIPG_ARRAY
+#define ARRAY_CAP JIPG_ARRAY_CAP
+#define STRING JIPG_STRING
+#define INT JIPG_INT
+#define FLOAT JIPG_FLOAT
+#define BOOL JIPG_BOOL
+#define PARSER JIPG_PARSER
+#endif
 
 static inline uint64_t sbox_hash(const char *key);
 
