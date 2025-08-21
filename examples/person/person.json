@@ -2,5 +2,5 @@
     "name": "Sam",
     "age": 20,
     "friends": ["Alan", "Alex", "Dan"],
-    "parents": ["Bob", "Louise"]
+    "parents": ["Homer", "Marge"]
 }

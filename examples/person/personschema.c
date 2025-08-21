@@ -1,4 +1,4 @@
-#include "../jipg.h"
+#include "../../jipg.h"
 
 JIPG_PARSER(Person,
             JIPG_OBJECT(

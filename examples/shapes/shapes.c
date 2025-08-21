@@ -1,46 +1,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "jsonparser.h"
+#define SHAPES_PARSER_IMPLEMENTATION
+#include "shapes_parser.h"
 
-char *read_file_to_buffer(const char *filename, size_t *size_out);
+static char *read_file_to_buffer(const char *filename, size_t *size_out);
 
 int main(void) {
     size_t file_size;
-    const char *json = read_file_to_buffer("person.json", &file_size);
+    const char *json = read_file_to_buffer("shapes.json", &file_size);
 
-    Person p = {0};
-    if (!parse_Person(json, file_size, &p)) {
+    Shapes shapes = {0};
+    if (!parse_Shapes(json, file_size, &shapes)) {
         return 1;
     }
 
-    printf(
-        "Name: %s\n"
-        "Age: %ld\n",
-        p.name, p.age);
-
-    printf("Friends: ");
-    for (size_t i = 0; i < p.friends.len; ++i) {
-        printf("%s", p.friends.items[i]);
-
-        if (i < p.friends.len - 1)
-            printf(", ");
+    printf("Shapes(%zu):\n", shapes.len);
+    for (size_t i = 0; i < shapes.len; ++i) {
+        printf(
+            "  side: %ld\n"
+            "  radius: %g\n"
+            "  x: %g\n"
+            "  y: %g\n\n",
+            shapes.items[i].sides,
+            shapes.items[i].radius,
+            shapes.items[i].coord.x,
+            shapes.items[i].coord.y);
     }
-    printf("\n");
-
-    printf("Parents: ");
-    for (size_t i = 0; i < p.parents.len; ++i) {
-        printf("%s", p.parents.items[i]);
-
-        if (i < p.parents.len - 1)
-            printf(", ");
-    }
-    printf("\n");
 
     return 0;
 }
 
-char *read_file_to_buffer(const char *filename, size_t *size_out) {
+static char *read_file_to_buffer(const char *filename, size_t *size_out) {
     FILE *fp = fopen(filename, "rb");
     if (!fp) {
         perror("fopen");
@@ -61,7 +52,7 @@ char *read_file_to_buffer(const char *filename, size_t *size_out) {
     }
     rewind(fp);
 
-    char *buffer = (char *)malloc(filesize + 1);  // +1 for null-terminator
+    char *buffer = (char *)malloc(filesize + 1);
     if (!buffer) {
         perror("malloc");
         fclose(fp);
