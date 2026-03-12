@@ -1,6 +1,8 @@
 #define JIPG_STRIP_PREFIX
 #include "../../jipg.h"
 
+// clang-format off
+
 PARSER(Shapes,
        ARRAY(
            OBJECT(
@@ -9,6 +11,11 @@ PARSER(Shapes,
                KV("coord",
                   OBJECT(
                       KV("x", FLOAT()),
-                      KV("y", FLOAT()))))))
+                      KV("y", FLOAT())
+                  ))
+            )
+       ))
+
+// clang-format on
 
 JIPG_MAIN()

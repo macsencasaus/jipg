@@ -1,6 +1,7 @@
 #ifndef JIPG_H
 #define JIPG_H
 
+#define _GNU_SOURCE
 #include <ctype.h>
 #include <libgen.h>
 #include <stdarg.h>
@@ -8,6 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef JIPG_DEFAULT_INT_TYPE
@@ -18,17 +20,19 @@
 #define JIPG_DEFAULT_FLOAT_TYPE "double"
 #endif
 
+#ifndef JIPG_DEFAULT_BOOL_TYPE
+#define JIPG_DEFAULT_BOOL_TYPE "double"
+#endif
+
 #ifndef JIPG_PARSER_CAP
 #define JIPG_PARSER_CAP 8
 #endif
 
 #ifndef JIPG_REALLOC
-#include <stdlib.h>
 #define JIPG_REALLOC realloc
 #endif
 
 #ifndef JIPG_FREE
-#include <stdlib.h>
 #define JIPG_FREE free
 #endif
 
@@ -59,6 +63,7 @@ static_assert((JIPG_INIT_LIST_CAP & (JIPG_INIT_LIST_CAP - 1)) == 0, "JIPG_INIT_L
 #define STR(x) STR2(x)
 
 typedef enum {
+    JIPG_KIND_NONE,
     JIPG_KIND_OBJECT,
     JIPG_KIND_OBJECT_KV,
     JIPG_KIND_ARRAY,
@@ -74,6 +79,8 @@ typedef struct Jipg_Value Jipg_Value;
 struct Jipg_Value {
     Jipg_Value_Kind kind;
     const char *head;
+    const char *alias;
+    bool nullable;
 
     union {
         struct {
@@ -92,6 +99,18 @@ struct Jipg_Value {
             size_t cap;
             Jipg_Value *internal;
         } as_array;
+
+        struct {
+            char *type;
+        } as_int;
+
+        struct {
+            char *type;
+        } as_float;
+
+        struct {
+            char *type;
+        } as_bool;
     };
 };
 
@@ -112,15 +131,35 @@ typedef struct {
 
 static Jipg_Context jipg_global_context = {0};
 
-static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
+typedef struct {
+    const char *alias;
+    bool nullable;
+
+    // array
+    struct {
+        size_t cap;
+    };
+
+    // int, float, bool
+    struct {
+        char *type;
+    };
+} Jipg_Opt;
+
+static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, Jipg_Opt opt, ...) {
     JIPG_ASSERT(jipg_global_context.arena_size < JIPG_VALUE_ARENA_CAP);
     Jipg_Value *value = jipg_global_context.arena + jipg_global_context.arena_size++;
-    *value = (Jipg_Value){.kind = kind};
+    *value = (Jipg_Value){
+        .kind = kind,
+        .alias = opt.alias,
+        .nullable = opt.nullable,
+    };
 
     va_list args;
-    va_start(args, kind);
+    va_start(args, opt);
 
     switch (kind) {
+        case JIPG_KIND_NONE:
         case JIPG_KIND_VALUE_COUNT:
             UNREACHABLE();
 
@@ -141,15 +180,24 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
         } break;
 
         case JIPG_KIND_ARRAY: {
-            value->as_array.cap = va_arg(args, int64_t);
+            value->as_array.cap = opt.cap;
             value->as_array.internal = va_arg(args, Jipg_Value *);
         } break;
 
         case JIPG_KIND_STRING:
-        case JIPG_KIND_INT:
-        case JIPG_KIND_FLOAT:
-        case JIPG_KIND_BOOL:
             break;
+
+        case JIPG_KIND_INT: {
+            value->as_int.type = opt.type ? opt.type : JIPG_DEFAULT_INT_TYPE;
+        } break;
+
+        case JIPG_KIND_FLOAT: {
+            value->as_float.type = opt.type ? opt.type : JIPG_DEFAULT_FLOAT_TYPE;
+        } break;
+
+        case JIPG_KIND_BOOL: {
+            value->as_bool.type = opt.type ? opt.type : JIPG_DEFAULT_BOOL_TYPE;
+        } break;
     }
 
     va_end(args);
@@ -157,34 +205,28 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
     return value;
 }
 
-#define JIPG_OBJECT_IMPL(...) \
-    new_jipg_value(JIPG_KIND_OBJECT, sizeof((Jipg_Value *[]){__VA_ARGS__}) / sizeof(Jipg_Value *), __VA_ARGS__)
-#define JIPG_OBJECT(...) JIPG_OBJECT_IMPL(__VA_ARGS__)
+#define JIPG_OBJECT(...)             \
+    new_jipg_value(JIPG_KIND_OBJECT, \
+                   (Jipg_Opt){0},    \
+                   sizeof((Jipg_Value *[]){__VA_ARGS__}) / sizeof(Jipg_Value *), __VA_ARGS__)
 
-#define JIPG_KV_IMPL(KEY, VALUE) \
-    new_jipg_value(JIPG_KIND_OBJECT_KV, KEY, VALUE)
-#define JIPG_KV(KEY, VALUE) JIPG_KV_IMPL(KEY, VALUE)
+#define JIPG_KV(KEY, VALUE, ...) \
+    new_jipg_value(JIPG_KIND_OBJECT_KV, (Jipg_Opt){__VA_ARGS__}, KEY, VALUE)
 
-#define JIPG_ARRAY_IMPL(CAP, INTERNAL) \
-    new_jipg_value(JIPG_KIND_ARRAY, CAP, INTERNAL)
-#define JIPG_ARRAY(INTERNAL) JIPG_ARRAY_IMPL(0, INTERNAL)
-#define JIPG_ARRAY_CAP(INTERNAL, CAP) JIPG_ARRAY_IMPL(CAP, INTERNAL)
+#define JIPG_ARRAY(INTERNAL, ...) \
+    new_jipg_value(JIPG_KIND_ARRAY, (Jipg_Opt){__VA_ARGS__}, INTERNAL)
 
-#define JIPG_STRING_IMPL() \
-    new_jipg_value(JIPG_KIND_STRING)
-#define JIPG_STRING() JIPG_STRING_IMPL()
+#define JIPG_STRING(...) \
+    new_jipg_value(JIPG_KIND_STRING, (Jipg_Opt){__VA_ARGS__})
 
-#define JIPG_INT_IMPL() \
-    new_jipg_value(JIPG_KIND_INT)
-#define JIPG_INT() JIPG_INT_IMPL()
+#define JIPG_INT(...) \
+    new_jipg_value(JIPG_KIND_INT, (Jipg_Opt){__VA_ARGS__})
 
-#define JIPG_FLOAT_IMPL() \
-    new_jipg_value(JIPG_KIND_FLOAT)
-#define JIPG_FLOAT() JIPG_FLOAT_IMPL()
+#define JIPG_FLOAT(...) \
+    new_jipg_value(JIPG_KIND_FLOAT, (Jipg_Opt){__VA_ARGS__})
 
-#define JIPG_BOOL_IMPL() \
-    new_jipg_value(JIPG_KIND_BOOL)
-#define JIPG_BOOL() JIPG_BOOL_IMPL()
+#define JIPG_BOOL(...) \
+    new_jipg_value(JIPG_KIND_BOOL, (Jipg_Opt){__VA_ARGS__})
 
 #define JIPG_PARSER(STRUCT_NAME, VALUE)                                         \
     static Jipg_Value *jipg_##STRUCT_NAME##_gen(void) {                         \
@@ -193,8 +235,8 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
                                                                                 \
     static void jipg_register_##STRUCT_NAME(void) __attribute__((constructor)); \
     static void jipg_register_##STRUCT_NAME(void) {                             \
-        JIPG_ASSERT(jipg_global_context.parser_count < JIPG_PARSER_CAP);        \
-        size_t idx = jipg_global_context.parser_count++;                        \
+        size_t idx = __COUNTER__;                                               \
+        jipg_global_context.parser_count = idx + 1;                             \
         jipg_global_context.parsers[idx] =                                      \
             (Jipg_Parser){.head_struct_name = #STRUCT_NAME,                     \
                           .value_gen = jipg_##STRUCT_NAME##_gen};               \
@@ -473,6 +515,68 @@ static uint64_t sbox_lut[256] = {
 
 static inline uint64_t sbox_hash(const char *key);
 
+static bool jipg_value_eq(const Jipg_Value *a, const Jipg_Value *b) {
+    if (a->kind != b->kind)
+        return false;
+
+    if (a->nullable != b->nullable)
+        return false;
+
+    switch (a->kind) {
+        case JIPG_KIND_NONE:
+        case JIPG_KIND_VALUE_COUNT:
+            UNREACHABLE();
+
+        case JIPG_KIND_OBJECT: {
+            return jipg_value_eq(a->as_object.kv_head, b->as_object.kv_head);
+        } break;
+
+        case JIPG_KIND_OBJECT_KV: {
+            if (strcmp(a->as_object_kv.key, b->as_object_kv.key) != 0)
+                return false;
+
+            if (!jipg_value_eq(a->as_object_kv.value, b->as_object_kv.value))
+                return false;
+
+            Jipg_Value *next_a = a->as_object_kv.next;
+            Jipg_Value *next_b = b->as_object_kv.next;
+
+            if ((next_a && !next_b) || (!next_a && next_b))
+                return false;
+
+            if (next_a) {
+                assert(next_b);
+                return jipg_value_eq(next_a, next_b);
+            }
+
+            return true;
+        } break;
+
+        case JIPG_KIND_ARRAY: {
+            return jipg_value_eq(a->as_array.internal, b->as_array.internal);
+        } break;
+
+        case JIPG_KIND_STRING: {
+            return true;
+        } break;
+
+        case JIPG_KIND_INT: {
+            return strcmp(a->as_int.type, b->as_int.type) == 0;
+        } break;
+
+        case JIPG_KIND_FLOAT: {
+            return strcmp(a->as_float.type, b->as_float.type) == 0;
+        } break;
+
+        case JIPG_KIND_BOOL: {
+            return strcmp(a->as_bool.type, b->as_bool.type) == 0;
+        } break;
+    }
+
+    UNREACHABLE();
+    return false;
+}
+
 static void jipg_generate_struct_names(Jipg_Value *value, const char *head_struct_name) {
     const char *fmt = NULL;
     char **name = NULL;
@@ -501,10 +605,8 @@ static void jipg_generate_struct_names(Jipg_Value *value, const char *head_struc
 
     if (name) {
         JIPG_ASSERT(fmt);
-        int n = snprintf(NULL, 0, fmt, head_struct_name, struct_num);
-        *name = JIPG_REALLOC(NULL, n + 1);
+        asprintf(name, fmt, head_struct_name, struct_num);
         JIPG_ASSERT(*name);
-        snprintf(*name, n + 1, fmt, head_struct_name, struct_num);
     }
 }
 
@@ -532,6 +634,7 @@ static const char *jipg_value_name(const Jipg_Value *value) {
         case JIPG_KIND_BOOL:
             return "bool";
 
+        case JIPG_KIND_NONE:
         case JIPG_KIND_OBJECT:
         case JIPG_KIND_OBJECT_KV:
         case JIPG_KIND_ARRAY:
@@ -541,7 +644,12 @@ static const char *jipg_value_name(const Jipg_Value *value) {
 }
 
 static void jipg_emit_field_type(FILE *header, Jipg_Value *value) {
+    if (value->alias) {
+        fprintf(header, "%s ", value->alias);
+        return;
+    }
     switch (value->kind) {
+        case JIPG_KIND_NONE:
         case JIPG_KIND_OBJECT_KV:
         case JIPG_KIND_VALUE_COUNT:
             UNREACHABLE();
@@ -586,6 +694,8 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
                 jipg_emit_field_type(header, kv->as_object_kv.value);
                 fprintf(header, "%s;\n", kv->as_object_kv.key);
             }
+            if (value->nullable)
+                fprintf(header, "    bool null;\n");
             fprintf(header, "} %s;\n", struct_name);
             name = struct_name;
 
@@ -602,8 +712,10 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
                     "    size_t len;\n"
                     "    ");
             jipg_emit_field_type(header, internal);
+            fprintf(header, "*items;\n");
+            if (value->nullable)
+                fprintf(header, "    bool null;\n");
             fprintf(header,
-                    "*items;\n"
                     "} %s;\n",
                     struct_name);
             name = struct_name;
@@ -615,6 +727,10 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
         // This means primitives may not be the only value
         default: {
         }
+    }
+
+    if (value->alias) {
+        fprintf(header, "typedef %s %s;\n\n", name, value->alias);
     }
 
     if (value->head) {
@@ -658,7 +774,7 @@ static void jipg_emit_header(FILE *header, Jipg_Value **values, size_t value_cou
         "<string.h>",
     };
 
-    fprintf(header, "// NOTE: This file has been auto-generated by %s\n\n", __FILE__);
+    fprintf(header, "// NOTE: This file was auto-generated by %s\n\n", __FILE__);
     fprintf(header, "#ifndef ");
     jipg_emit_header_macro(header, header_name);
     fprintf(header, "\n#define ");
@@ -681,49 +797,57 @@ static void jipg_emit_header(FILE *header, Jipg_Value **values, size_t value_cou
 static void jipg_emit_lexer_impl(FILE *source) {
     fprintf(source,
             "typedef enum {\n"
-            "   TOKEN_TYPE_NONE,\n"
-            "   TOKEN_TYPE_ILLEGAL,\n"
-            "   TOKEN_TYPE_EOF,\n"
+            "    TOKEN_TYPE_NONE,\n"
+            "    TOKEN_TYPE_ILLEGAL,\n"
+            "    TOKEN_TYPE_EOF,\n"
             "\n"
-            "   TOKEN_TYPE_LBRACE,\n"
-            "   TOKEN_TYPE_RBRACE,\n"
-            "   TOKEN_TYPE_LBRACKET,\n"
-            "   TOKEN_TYPE_RBRACKET,\n"
-            "   TOKEN_TYPE_COLON,\n"
-            "   TOKEN_TYPE_COMMA,\n"
+            "    TOKEN_TYPE_LBRACE,\n"
+            "    TOKEN_TYPE_RBRACE,\n"
+            "    TOKEN_TYPE_LBRACKET,\n"
+            "    TOKEN_TYPE_RBRACKET,\n"
+            "    TOKEN_TYPE_COLON,\n"
+            "    TOKEN_TYPE_COMMA,\n"
             "\n"
-            "   TOKEN_TYPE_STRING,\n"
-            "   TOKEN_TYPE_NUMBER,\n"
-            "   TOKEN_TYPE_TRUE,\n"
-            "   TOKEN_TYPE_FALSE,\n"
-            "   TOKEN_TYPE_NULL,\n"
+            "    TOKEN_TYPE_STRING,\n"
+            "    TOKEN_TYPE_NUMBER,\n"
+            "    TOKEN_TYPE_TRUE,\n"
+            "    TOKEN_TYPE_FALSE,\n"
+            "    TOKEN_TYPE_NULL,\n"
             "} Token_Type;\n");
 
     fprintf(source,
             "typedef struct {\n"
-            "   const char *lit;\n"
-            "   uint32_t len;\n"
-            "   Token_Type type;\n"
+            "    const char *lit;\n"
+            "    uint32_t len;\n"
+            "    Token_Type type;\n"
             "} Token;\n");
 
     fprintf(source,
             "typedef struct {\n"
-            "   const char *input;\n"
-            "   size_t len;\n"
-            "   size_t pos;\n"
-            "   size_t read_pos;\n"
-            "   char ch;\n"
+            "    const char *input;\n"
+            "    size_t len;\n"
+            "    size_t pos;\n"
+            "    size_t read_pos;\n"
+            "    size_t line;\n"
+            "    size_t col;\n"
+            "    char ch;\n"
             "} Lexer;\n");
 
     fprintf(source,
             "static inline void read_char(Lexer *l) {\n"
-            "   if (l->read_pos >= l->len) {\n"
-            "      l->ch = 0;\n"
-            "   } else {\n"
-            "      l->ch = l->input[l->read_pos];\n"
-            "   }\n"
-            "   l->pos = l->read_pos;\n"
-            "   ++l->read_pos;\n"
+            "    if (l->ch == '\\n') { \n"
+            "        ++l->line;\n"
+            "        l->col = 0;\n"
+            "    } else {\n"
+            "        ++l->col;\n"
+            "    }\n"
+            "    if (l->read_pos >= l->len) {\n"
+            "        l->ch = 0;\n"
+            "    } else {\n"
+            "        l->ch = l->input[l->read_pos];\n"
+            "    }\n"
+            "    l->pos = l->read_pos;\n"
+            "    ++l->read_pos;\n"
             "}\n");
 
     fprintf(source,
@@ -734,7 +858,7 @@ static void jipg_emit_lexer_impl(FILE *source) {
 
     fprintf(source,
             "static inline size_t read_digits(Lexer *l) {\n"
-            "    size_t size = 0;"
+            "    size_t size = 0;\n"
             "    while (isdigit(l->ch)) {\n"
             "        ++size;\n"
             "        read_char(l);\n"
@@ -828,7 +952,6 @@ static void jipg_emit_lexer_impl(FILE *source) {
             "                    ++tok.len;\n"
             "                }\n"
             "            }\n"
-            "            // read_char(l);\n"
             "        } break;\n"
             "        default: {\n"
             "            if (isdigit(l->ch) || l->ch == '.' || l->ch == '-') {\n"
@@ -1152,11 +1275,11 @@ static int jipg_main(int argc, char *argv[]) {
     return 0;
 }
 
-#define JIPG_MAIN()                    \
-    int main(int argc, char *argv[]) { \
-        return jipg_main(argc, argv);  \
+#define JIPG_MAIN()                                                                             \
+    static_assert(__COUNTER__ < JIPG_PARSER_CAP, "Too many parsers, increase JIPG_PARSER_CAP"); \
+    int main(int argc, char *argv[]) {                                                          \
+        return jipg_main(argc, argv);                                                           \
     }
-
 
 static inline uint64_t sbox_hash(const char *key) {
     uint64_t res = 0;
