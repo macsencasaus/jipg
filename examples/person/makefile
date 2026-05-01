@@ -8,5 +8,5 @@ person_parser_generator: personschema.c ../../jipg.h
 	cc -o person_parser_generator personschema.c
 
 clean:
-	rm -f person person_parser*
+	rm person person_parser*
 .PHONY: clean

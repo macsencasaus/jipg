@@ -4,14 +4,53 @@
 #define SHAPES_PARSER_IMPLEMENTATION
 #include "shapes_parser.h"
 
-static char *read_file_to_buffer(const char *filename, size_t *size_out);
-
 int main(void) {
-    size_t file_size;
-    const char *json = read_file_to_buffer("shapes.json", &file_size);
+    const char *json =
+        "[\n"
+        "    {\n"
+        "        \"sides\": 5,\n"
+        "        \"radius\": 14.2,\n"
+        "        \"coords\": {\n"
+        "            \"x\": -3.4,\n"
+        "            \"y\": 7.8\n"
+        "        }\n"
+        "    },\n"
+        "    {\n"
+        "        \"sides\": 8,\n"
+        "        \"radius\": 22.5,\n"
+        "        \"coords\": {\n"
+        "            \"x\": 12.1,\n"
+        "            \"y\": -4.6\n"
+        "        }\n"
+        "    },\n"
+        "    {\n"
+        "        \"sides\": 4,\n"
+        "        \"radius\": 9.7,\n"
+        "        \"coords\": {\n"
+        "            \"x\": 0.0,\n"
+        "            \"y\": 15.3\n"
+        "        }\n"
+        "    },\n"
+        "    {\n"
+        "        \"sides\": 6,\n"
+        "        \"radius\": 30.0,\n"
+        "        \"coords\": {\n"
+        "            \"x\": -10.2,\n"
+        "            \"y\": -10.2\n"
+        "        }\n"
+        "    },\n"
+        "    {\n"
+        "        \"sides\": 7,\n"
+        "        \"radius\": 18.9,\n"
+        "        \"coords\": {\n"
+        "            \"x\": 5.5,\n"
+        "            \"y\": -2.7\n"
+        "        }\n"
+        "    }\n"
+        "]";
 
     Shapes shapes = {0};
-    if (!parse_Shapes(json, file_size, &shapes)) {
+    if (!parse_Shapes_cstr(json, &shapes)) {
         fprintf(stderr, "Error\n");
         return 1;
     }
@@ -32,49 +71,4 @@ int main(void) {
     }
 
     return 0;
-}
-
-static char *read_file_to_buffer(const char *filename, size_t *size_out) {
-    FILE *fp = fopen(filename, "rb");
-    if (!fp) {
-        perror("fopen");
-        return NULL;
-    }
-
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        perror("fseek");
-        fclose(fp);
-        return NULL;
-    }
-
-    long filesize = ftell(fp);
-    if (filesize < 0) {
-        perror("ftell");
-        fclose(fp);
-        return NULL;
-    }
-    rewind(fp);
-
-    char *buffer = (char *)malloc(filesize + 1);
-    if (!buffer) {
-        perror("malloc");
-        fclose(fp);
-        return NULL;
-    }
-
-    size_t read_size = fread(buffer, 1, filesize, fp);
-    if (read_size != (size_t)filesize) {
-        perror("fread");
-        free(buffer);
-        fclose(fp);
-        return NULL;
-    }
-
-    buffer[filesize] = '\0';
-
-    fclose(fp);
-    if (size_out) {
-        *size_out = (size_t)filesize;
-    }
-    return buffer;
 }
