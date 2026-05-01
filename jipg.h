@@ -37,6 +37,14 @@
 #define JIPG_ASSERT assert
 #endif
 
+#ifdef __cplusplus
+#define CAST(TYPE, VALUE) static_cast<TYPE>(VALUE)
+#define PTR_CAST(TYPE, VALUE) reinterpret_cast<TYPE>(VALUE)
+#else
+#define CAST(TYPE, VALUE) (TYPE)(VALUE)
+#define PTR_CAST(TYPE, VALUE) (TYPE)(VALUE)
+#endif
+
 #ifndef JIPG_VALUE_ARENA_CAP
 #define JIPG_VALUE_ARENA_CAP 1024
 #endif
@@ -157,7 +165,7 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
         } break;
 
         case JIPG_KIND_ARRAY: {
-            value->as_array.cap = va_arg(args, int64_t);
+            value->as_array.cap = va_arg(args, size_t);
             value->as_array.internal = va_arg(args, Jipg_Value *);
         } break;
 
@@ -281,8 +289,8 @@ static void jipg_generate_struct_names(Jipg_Value *value, const char *head_struc
 
     if (name) {
         JIPG_ASSERT(fmt);
-        int n = snprintf(NULL, 0, fmt, head_struct_name, struct_num);
-        *name = JIPG_REALLOC(NULL, n + 1);
+        size_t n = CAST(size_t, snprintf(NULL, 0, fmt, head_struct_name, struct_num));
+        *name = PTR_CAST(char *, realloc(NULL, n + 1));
         JIPG_ASSERT(*name);
         snprintf(*name, n + 1, fmt, head_struct_name, struct_num);
     }
@@ -315,6 +323,7 @@ static const char *jipg_value_struct_name(const Jipg_Value *value) {
         case JIPG_KIND_VALUE_COUNT:
             return NULL;
     }
+    UNREACHABLE();
 }
 
 static const char *jipg_value_name(const Jipg_Value *value) {
@@ -337,6 +346,7 @@ static const char *jipg_value_name(const Jipg_Value *value) {
         case JIPG_KIND_PARSER_REF:
             UNREACHABLE();
     };
+    UNREACHABLE();
 }
 
 static void jipg_emit_field_type(FILE *header, Jipg_Value *value) {
@@ -432,8 +442,9 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
     }
 }
 
-static void jipg_emit_file_name_all_caps(FILE *header, char *file_name) {
-    char *base = basename(file_name);
+static void jipg_emit_file_name_all_caps(FILE *header, const char *file_name) {
+    char *cpy = strdup(file_name);
+    char *base = basename(cpy);
     for (char c = *base; c && c != '.'; c = *(++base)) {
         if (isalpha(c)) {
             fputc(toupper(c), header);
@@ -441,18 +452,19 @@ static void jipg_emit_file_name_all_caps(FILE *header, char *file_name) {
             fputc('_', header);
         }
     }
+    free(cpy);
 }
 
-static void jipg_emit_header_macro(FILE *header, char *header_name) {
+static void jipg_emit_header_macro(FILE *header, const char *header_name) {
     jipg_emit_file_name_all_caps(header, header_name);
     fprintf(header, "_H");
 }
-static void jipg_emit_header_impl_macro(FILE *header, char *header_name) {
+static void jipg_emit_header_impl_macro(FILE *header, const char *header_name) {
     jipg_emit_file_name_all_caps(header, header_name);
     fprintf(header, "_IMPLEMENTATION");
 }
 
-static void jipg_emit_header(FILE *header, Jipg_Value **values, size_t value_count, char *header_name) {
+static void jipg_emit_header(FILE *header, Jipg_Value **values, size_t value_count, const char *header_name) {
     static const char *header_includes[] = {
         "<stdbool.h>",
         "<stddef.h>",
@@ -599,7 +611,7 @@ static void jipg_emit_lexer_impl(FILE *source) {
     fprintf(source,
             "static inline Token next_token(Lexer *l) {\n"
             "    skip_whitespace(l);\n"
-            "    Token tok = {.lit = l->input + l->pos, .len = 1};\n"
+            "    Token tok = {l->input + l->pos, 1, TOKEN_TYPE_NONE};\n"
             "    switch (l->ch) {\n"
             "        case '{': {\n"
             "            tok.type = TOKEN_TYPE_LBRACE;\n"
@@ -635,7 +647,7 @@ static void jipg_emit_lexer_impl(FILE *source) {
             "        default: {\n"
             "            if (isdigit(l->ch) || l->ch == '.' || l->ch == '-') {\n"
             "                tok.type = TOKEN_TYPE_NUMBER;"
-            "                tok.len = read_number(l);\n"
+            "                tok.len = CAST(uint32_t, read_number(l));\n"
             "                return tok;"
             "            } else {\n"
             "                if (strncmp(l->input, \"true\", 4) == 0) {\n"
@@ -709,7 +721,7 @@ static void jipg_emit_helpers(FILE *source) {
             "    Token tok = next_token(l);\n"
             "    if (tok.type != TOKEN_TYPE_STRING)\n"
             "        return false;\n"
-            "    *res = (char *)%s(NULL, tok.len + 1);\n"
+            "    *res = PTR_CAST(char *, %s(NULL, tok.len + 1));\n"
             "    if (!*res) return false;\n"
             "    memcpy(*res, tok.lit, tok.len);\n"
             "    (*res)[tok.len] = 0;\n"
@@ -791,7 +803,10 @@ static void jipg_emit_array_parser(FILE *source, Jipg_Value *array) {
         size_t cap = array->as_array.cap;
         fprintf(source,
                 "        if (res->len == 0) {\n"
-                "            res->items = %s(NULL, %zu * sizeof(*res->items));\n"
+                "            res->items = PTR_CAST(");
+        jipg_emit_field_type(source, internal);
+        fprintf(source,
+                "*, %s(NULL, %zu * sizeof(*res->items)));\n"
                 "            if (res->items == NULL) return false;\n"
                 "        }\n"
                 "        if (res->len == %zu) return false;\n",
@@ -800,10 +815,14 @@ static void jipg_emit_array_parser(FILE *source, Jipg_Value *array) {
         fprintf(source,
                 "        if (res->len == 0 || (res->len > %d && (res->len & (res->len - 1)) == 0)) {\n"
                 "            size_t new_cap = res->len ? res->len * 2 : %d;\n"
-                "            res->items = %s(res->items, new_cap * sizeof(*res->items));\n"
+                "            res->items = PTR_CAST(",
+                JIPG_INIT_LIST_CAP, JIPG_INIT_LIST_CAP);
+        jipg_emit_field_type(source, internal);
+        fprintf(source,
+                "*, %s(res->items, new_cap * sizeof(*res->items)));\n"
                 "            if (res->items == NULL) return false;\n"
                 "        }\n",
-                JIPG_INIT_LIST_CAP, JIPG_INIT_LIST_CAP, STR(JIPG_REALLOC));
+                STR(JIPG_REALLOC));
     }
 
     fprintf(source,
@@ -841,14 +860,9 @@ static void jipg_emit_head_value_parser(FILE *source, Jipg_Value *value) {
     const char *struct_name = jipg_value_struct_name(value);
     JIPG_ASSERT(struct_name);
 
-    int n = strlen(struct_name) - 1;
-
     fprintf(source,
             "bool parse_%s(const char *json, size_t json_length, %s *res) {\n"
-            "    Lexer l = {\n"
-            "        .input = json,\n"
-            "        .len = json_length,\n"
-            "    };\n"
+            "    Lexer l = {json, json_length, 0, 0, 0};\n"
             "    read_char(&l);\n"
             "    return parse_%s(&l, res);\n"
             "}\n",
@@ -871,6 +885,15 @@ static void jipg_emit_source(FILE *source, Jipg_Value **values, size_t value_cou
         fprintf(source, "#include %s\n", source_includes[i]);
     fprintf(source, "\n");
 
+    fprintf(source,
+            "#ifdef __cplusplus\n"
+            "#define CAST(TYPE, VALUE) static_cast<TYPE>(VALUE)\n"
+            "#define PTR_CAST(TYPE, VALUE) reinterpret_cast<TYPE>(VALUE)\n"
+            "#else\n"
+            "#define CAST(TYPE, VALUE) (TYPE)(VALUE)\n"
+            "#define PTR_CAST(TYPE, VALUE) (TYPE)(VALUE)\n"
+            "#endif\n\n");
+
     jipg_emit_lexer_impl(source);
     jipg_emit_helpers(source);
 
@@ -880,7 +903,7 @@ static void jipg_emit_source(FILE *source, Jipg_Value **values, size_t value_cou
     }
 }
 
-static void jipg_parse_arg(char *arg, char **header_name, char **source_name, bool *single_file) {
+static void jipg_parse_arg(const char *arg, const char **header_name, const char **source_name, bool *single_file) {
     static const char *short_help_flag = "-h";
     static const char *long_help_flag = "--help";
     static const char *header_flag = "--header=";
@@ -912,8 +935,8 @@ static void jipg_parse_arg(char *arg, char **header_name, char **source_name, bo
     }
 }
 
-static int jipg_main(/* cli args */ int argc, char *argv[],
-                     /* config args */ int cfg_argc, char *cfg_argv[]) {
+static int jipg_main(/* cli args */ int argc, const char *argv[],
+                     /* config args */ int cfg_argc, const char *cfg_argv[]) {
     size_t value_count = jipg_global_context.parser_count;
     for (size_t i = 0; i < value_count; ++i) {
         Jipg_Parser *parser = jipg_global_context.parsers + i;
@@ -925,8 +948,8 @@ static int jipg_main(/* cli args */ int argc, char *argv[],
 
     jipg_global_context.program_name = argv[0];
 
-    char *header_name = "jsonparser.h";
-    char *source_name = "jsonparser.c";
+    const char *header_name = "jsonparser.h";
+    const char *source_name = "jsonparser.c";
     bool single_file = false;
 
     for (int i = 0; i < cfg_argc; ++i) {
@@ -973,10 +996,10 @@ static int jipg_main(/* cli args */ int argc, char *argv[],
     return 0;
 }
 
-#define JIPG_MAIN(...)                                                      \
-    int main(int argc, char *argv[]) {                                      \
-        char *args[] = {/* Stop GCC from complaining */ NULL, __VA_ARGS__}; \
-        return jipg_main(argc, argv, ARRAY_SIZE(args), args);               \
+#define JIPG_MAIN(...)                                                            \
+    int main(int argc, const char *argv[]) {                                      \
+        const char *args[] = {/* Stop GCC from complaining */ NULL, __VA_ARGS__}; \
+        return jipg_main(argc, argv, ARRAY_SIZE(args), args);                     \
     }
 
 #endif  // JIPG_H

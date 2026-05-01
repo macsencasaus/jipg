@@ -49,7 +49,7 @@ int main(void) {
         "    }\n"
         "]";
 
-    Shapes shapes = {0};
+    Shapes shapes{};
     if (!parse_Shapes_cstr(json, &shapes)) {
         fprintf(stderr, "Error\n");
         return 1;
