@@ -186,18 +186,18 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
     new_jipg_value(JIPG_KIND_BOOL)
 #define JIPG_BOOL() JIPG_BOOL_IMPL()
 
-#define JIPG_PARSER(STRUCT_NAME, VALUE)                                         \
-    static Jipg_Value *jipg_##STRUCT_NAME##_gen(void) {                         \
-        return VALUE;                                                           \
-    }                                                                           \
-                                                                                \
-    static void jipg_register_##STRUCT_NAME(void) __attribute__((constructor)); \
-    static void jipg_register_##STRUCT_NAME(void) {                             \
-        JIPG_ASSERT(jipg_global_context.parser_count < JIPG_PARSER_CAP);        \
-        size_t idx = jipg_global_context.parser_count++;                        \
-        jipg_global_context.parsers[idx] =                                      \
-            (Jipg_Parser){.head_struct_name = #STRUCT_NAME,                     \
-                          .value_gen = jipg_##STRUCT_NAME##_gen};               \
+#define JIPG_PARSER(STRUCT_NAME, VALUE)                                                             \
+    static Jipg_Value *jipg_##STRUCT_NAME##_gen(void) {                                             \
+        return VALUE;                                                                               \
+    }                                                                                               \
+                                                                                                    \
+    static void jipg_register_##STRUCT_NAME(void) __attribute__((constructor));                     \
+    static void jipg_register_##STRUCT_NAME(void) {                                                 \
+        static_assert(__COUNTER__ < JIPG_PARSER_CAP, "Too many parsers, increase JIPG_PARSER_CAP"); \
+        size_t idx = jipg_global_context.parser_count++;                                            \
+        jipg_global_context.parsers[idx] =                                                          \
+            (Jipg_Parser){.head_struct_name = #STRUCT_NAME,                                         \
+                          .value_gen = jipg_##STRUCT_NAME##_gen};                                   \
     }
 
 #ifdef JIPG_STRIP_PREFIX
