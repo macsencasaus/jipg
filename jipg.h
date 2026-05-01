@@ -117,6 +117,9 @@ typedef struct {
     Jipg_Value *values[JIPG_PARSER_CAP];
 
     size_t name_alloc;
+
+    const char *program_name;
+    const char *desc;
 } Jipg_Context;
 
 static Jipg_Context jipg_global_context = {0};
@@ -139,6 +142,10 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
             Jipg_Value **last_next = &value->as_object.kv_head;
             for (size_t i = 0; i < count; ++i) {
                 Jipg_Value *kv = va_arg(args, Jipg_Value *);
+                if (kv->kind != JIPG_KIND_OBJECT_KV) {
+                    fprintf(stderr, "Error creating parser: arguments to JIPG_OBJECT may only be JIPG_KV\n");
+                    exit(1);
+                }
                 *last_next = kv;
                 last_next = &kv->as_object_kv.next;
             }
@@ -216,6 +223,12 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
         jipg_global_context.parsers[idx] =                                                          \
             (Jipg_Parser){.head_struct_name = #STRUCT_NAME,                                         \
                           .value_gen = jipg_##STRUCT_NAME##_gen};                                   \
+    }
+
+#define JIPG_DESC(DESC)                                       \
+    static void jipg_desc(void) __attribute__((constructor)); \
+    static void jipg_desc(void) {                             \
+        jipg_global_context.desc = DESC;                      \
     }
 
 #ifdef JIPG_STRIP_PREFIX
@@ -868,25 +881,33 @@ static void jipg_emit_source(FILE *source, Jipg_Value **values, size_t value_cou
 }
 
 static void jipg_parse_arg(char *arg, char **header_name, char **source_name, bool *single_file) {
-    static const char *help_str = "--help";
-    static const char *header_str = "--header=";
-    static const char *source_str = "--source=";
-    static const char *single_file_str = "--single-file";
+    static const char *short_help_flag = "-h";
+    static const char *long_help_flag = "--help";
+    static const char *header_flag = "--header=";
+    static const char *source_flag = "--source=";
+    static const char *single_file_flag = "--single-file";
 
-    if (strncmp(arg, help_str, strlen(help_str)) == 0) {
+    if (strncmp(arg, long_help_flag, strlen(long_help_flag)) == 0 ||
+        strncmp(arg, short_help_flag, strlen(short_help_flag)) == 0) {
+        const char *desc = jipg_global_context.desc
+                               ? jipg_global_context.desc
+                               : "Custom built JSON Parser Generator for C!";
+
         printf(
-            "jipg.h - the single file JSON Parser Generator for C!\n"
+            "Usage: %s <options>\n"
+            "\n%s\n\n"
             "Command line options:\n"
-            "  --help                  Show this message and exit.\n"
+            "  -h, --help              Show this message and exit.\n"
             "  --header=<header-file>  Path of generated header file.\n"
             "  --source=<source-file>  Path of generated source file.\n"
-            "  --single-file           Generates single STB style header file.\n");
+            "  --single-file           Generates single STB style header file.\n",
+            jipg_global_context.program_name, desc);
         exit(0);
-    } else if (strncmp(arg, header_str, strlen(header_str)) == 0) {
-        *header_name = arg + strlen(header_str);
-    } else if (strncmp(arg, source_str, strlen(source_str)) == 0) {
-        *source_name = arg + strlen(source_str);
-    } else if (strncmp(arg, single_file_str, strlen(single_file_str)) == 0) {
+    } else if (strncmp(arg, header_flag, strlen(header_flag)) == 0) {
+        *header_name = arg + strlen(header_flag);
+    } else if (strncmp(arg, source_flag, strlen(source_flag)) == 0) {
+        *source_name = arg + strlen(source_flag);
+    } else if (strncmp(arg, single_file_flag, strlen(single_file_flag)) == 0) {
         *single_file = true;
     }
 }
@@ -901,6 +922,8 @@ static int jipg_main(/* cli args */ int argc, char *argv[],
         jipg_generate_struct_names(value, parser->head_struct_name);
         jipg_global_context.values[i] = value;
     }
+
+    jipg_global_context.program_name = argv[0];
 
     char *header_name = "jsonparser.h";
     char *source_name = "jsonparser.c";

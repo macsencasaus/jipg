@@ -14,4 +14,5 @@ PARSER(Shape,
 
 PARSER(Shapes, ARRAY(USE(Shape)))
 
+JIPG_DESC("JSON parser generator for shape object.")
 JIPG_MAIN("--single-file", "--header=shapes_parser.h")
