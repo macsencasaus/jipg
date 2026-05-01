@@ -434,11 +434,6 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
         name = value->head;
 
         fprintf(header, "bool parse_%s(const char *json, size_t json_length, %s *res);\n\n", name, name);
-        fprintf(header,
-                "static inline bool parse_%s_cstr(const char *json, %s *res) {\n"
-                "    return parse_%s(json, strlen(json), res);\n"
-                "}\n\n",
-                name, name, name);
     }
 }
 

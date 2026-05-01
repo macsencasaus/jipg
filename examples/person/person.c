@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "person_parser.h"
 
@@ -13,7 +14,7 @@ int main(void) {
         "}";
 
     Person p = {0};
-    if (!parse_Person_cstr(json, &p)) {
+    if (!parse_Person(json, strlen(json), &p)) {
         return 1;
     }
 

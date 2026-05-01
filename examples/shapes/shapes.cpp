@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SHAPES_PARSER_IMPLEMENTATION
 #include "shapes_parser.h"
@@ -50,7 +51,7 @@ int main(void) {
         "]";
 
     Shapes shapes{};
-    if (!parse_Shapes_cstr(json, &shapes)) {
+    if (!parse_Shapes(json, strlen(json), &shapes)) {
         fprintf(stderr, "Error\n");
         return 1;
     }
