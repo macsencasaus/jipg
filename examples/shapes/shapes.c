@@ -12,20 +12,23 @@ int main(void) {
 
     Shapes shapes = {0};
     if (!parse_Shapes(json, file_size, &shapes)) {
+        fprintf(stderr, "Error\n");
         return 1;
     }
 
     printf("Shapes(%zu):\n", shapes.len);
     for (size_t i = 0; i < shapes.len; ++i) {
+        Shape shape = shapes.items[i];
+        Coordinates coords = shape.coords;
         printf(
             "  side: %ld\n"
             "  radius: %g\n"
             "  x: %g\n"
             "  y: %g\n\n",
-            shapes.items[i].sides,
-            shapes.items[i].radius,
-            shapes.items[i].coord.x,
-            shapes.items[i].coord.y);
+            shape.sides,
+            shape.radius,
+            coords.x,
+            coords.y);
     }
 
     return 0;

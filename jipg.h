@@ -66,6 +66,9 @@ typedef enum {
     JIPG_KIND_INT,
     JIPG_KIND_FLOAT,
     JIPG_KIND_BOOL,
+
+    JIPG_KIND_PARSER_REF,
+
     JIPG_KIND_VALUE_COUNT,
 } Jipg_Value_Kind;
 
@@ -92,6 +95,10 @@ struct Jipg_Value {
             size_t cap;
             Jipg_Value *internal;
         } as_array;
+
+        struct {
+            const char *struct_name;
+        } as_parser_ref;
     };
 };
 
@@ -106,6 +113,8 @@ typedef struct {
 
     size_t parser_count;
     Jipg_Parser parsers[JIPG_PARSER_CAP];
+
+    Jipg_Value *values[JIPG_PARSER_CAP];
 
     size_t name_alloc;
 } Jipg_Context;
@@ -145,6 +154,10 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
             value->as_array.internal = va_arg(args, Jipg_Value *);
         } break;
 
+        case JIPG_KIND_PARSER_REF: {
+            value->as_parser_ref.struct_name = va_arg(args, char *);
+        } break;
+
         case JIPG_KIND_STRING:
         case JIPG_KIND_INT:
         case JIPG_KIND_FLOAT:
@@ -159,32 +172,37 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
 
 #define JIPG_OBJECT_IMPL(...) \
     new_jipg_value(JIPG_KIND_OBJECT, sizeof((Jipg_Value *[]){__VA_ARGS__}) / sizeof(Jipg_Value *), __VA_ARGS__)
-#define JIPG_OBJECT(...) JIPG_OBJECT_IMPL(__VA_ARGS__)
 
 #define JIPG_KV_IMPL(KEY, VALUE) \
     new_jipg_value(JIPG_KIND_OBJECT_KV, KEY, VALUE)
-#define JIPG_KV(KEY, VALUE) JIPG_KV_IMPL(KEY, VALUE)
 
 #define JIPG_ARRAY_IMPL(CAP, INTERNAL) \
     new_jipg_value(JIPG_KIND_ARRAY, CAP, INTERNAL)
-#define JIPG_ARRAY(INTERNAL) JIPG_ARRAY_IMPL(0, INTERNAL)
-#define JIPG_ARRAY_CAP(INTERNAL, CAP) JIPG_ARRAY_IMPL(CAP, INTERNAL)
 
 #define JIPG_STRING_IMPL() \
     new_jipg_value(JIPG_KIND_STRING)
-#define JIPG_STRING() JIPG_STRING_IMPL()
 
 #define JIPG_INT_IMPL() \
     new_jipg_value(JIPG_KIND_INT)
-#define JIPG_INT() JIPG_INT_IMPL()
 
 #define JIPG_FLOAT_IMPL() \
     new_jipg_value(JIPG_KIND_FLOAT)
-#define JIPG_FLOAT() JIPG_FLOAT_IMPL()
 
 #define JIPG_BOOL_IMPL() \
     new_jipg_value(JIPG_KIND_BOOL)
+
+#define JIPG_USE_IMPL(NAME) \
+    new_jipg_value(JIPG_KIND_PARSER_REF, STR(NAME))
+
 #define JIPG_BOOL() JIPG_BOOL_IMPL()
+#define JIPG_OBJECT(...) JIPG_OBJECT_IMPL(__VA_ARGS__)
+#define JIPG_KV(KEY, VALUE) JIPG_KV_IMPL(KEY, VALUE)
+#define JIPG_ARRAY(INTERNAL) JIPG_ARRAY_IMPL(0, INTERNAL)
+#define JIPG_ARRAY_CAP(INTERNAL, CAP) JIPG_ARRAY_IMPL(CAP, INTERNAL)
+#define JIPG_STRING() JIPG_STRING_IMPL()
+#define JIPG_INT() JIPG_INT_IMPL()
+#define JIPG_FLOAT() JIPG_FLOAT_IMPL()
+#define JIPG_USE(NAME) JIPG_USE_IMPL(NAME)
 
 #define JIPG_PARSER(STRUCT_NAME, VALUE)                                                             \
     static Jipg_Value *jipg_##STRUCT_NAME##_gen(void) {                                             \
@@ -210,6 +228,7 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
 #define FLOAT JIPG_FLOAT
 #define BOOL JIPG_BOOL
 #define PARSER JIPG_PARSER
+#define USE JIPG_USE
 #endif
 
 static inline uint64_t fnv1a_64(const char *s) {
@@ -262,7 +281,25 @@ static const char *jipg_value_struct_name(const Jipg_Value *value) {
             return value->as_object.struct_name;
         case JIPG_KIND_ARRAY:
             return value->as_array.struct_name;
-        default:
+        case JIPG_KIND_PARSER_REF: {
+            const char *head_name = value->as_parser_ref.struct_name;
+            for (size_t i = 0; i < jipg_global_context.parser_count; ++i) {
+                Jipg_Value *value = jipg_global_context.values[i];
+                if (!value->head)
+                    continue;
+                if (strcmp(head_name, value->head) == 0)
+                    return jipg_value_struct_name(value);
+            }
+            fprintf(stderr, "Use of undefined parser: %s\n", head_name);
+            exit(1);
+        } break;
+
+        case JIPG_KIND_OBJECT_KV:
+        case JIPG_KIND_STRING:
+        case JIPG_KIND_INT:
+        case JIPG_KIND_FLOAT:
+        case JIPG_KIND_BOOL:
+        case JIPG_KIND_VALUE_COUNT:
             return NULL;
     }
 }
@@ -284,6 +321,7 @@ static const char *jipg_value_name(const Jipg_Value *value) {
         case JIPG_KIND_OBJECT_KV:
         case JIPG_KIND_ARRAY:
         case JIPG_KIND_VALUE_COUNT:
+        case JIPG_KIND_PARSER_REF:
             UNREACHABLE();
     };
 }
@@ -313,6 +351,9 @@ static void jipg_emit_field_type(FILE *header, Jipg_Value *value) {
         } break;
         case JIPG_KIND_BOOL: {
             fprintf(header, "bool ");
+        } break;
+        case JIPG_KIND_PARSER_REF: {
+            fprintf(header, "%s ", value->as_parser_ref.struct_name);
         } break;
     }
 }
@@ -769,8 +810,15 @@ static void jipg_emit_value_parser(FILE *source, Jipg_Value *value) {
         case JIPG_KIND_ARRAY: {
             jipg_emit_array_parser(source, value);
         } break;
-        default: {
-        }
+
+        case JIPG_KIND_OBJECT_KV:
+        case JIPG_KIND_STRING:
+        case JIPG_KIND_INT:
+        case JIPG_KIND_FLOAT:
+        case JIPG_KIND_BOOL:
+        case JIPG_KIND_PARSER_REF:
+        case JIPG_KIND_VALUE_COUNT:
+            break;
     }
 }
 
@@ -846,14 +894,12 @@ static void jipg_parse_arg(char *arg, char **header_name, char **source_name, bo
 static int jipg_main(/* cli args */ int argc, char *argv[],
                      /* config args */ int cfg_argc, char *cfg_argv[]) {
     size_t value_count = jipg_global_context.parser_count;
-    static Jipg_Value *values[JIPG_PARSER_CAP];
     for (size_t i = 0; i < value_count; ++i) {
         Jipg_Parser *parser = jipg_global_context.parsers + i;
-        values[i] = parser->value_gen();
-        values[i]->head = parser->head_struct_name;
-        jipg_generate_struct_names(
-            values[i],
-            parser->head_struct_name);
+        Jipg_Value *value = parser->value_gen();
+        value->head = parser->head_struct_name;
+        jipg_generate_struct_names(value, parser->head_struct_name);
+        jipg_global_context.values[i] = value;
     }
 
     char *header_name = "jsonparser.h";
@@ -875,7 +921,7 @@ static int jipg_main(/* cli args */ int argc, char *argv[],
         return 1;
     }
 
-    jipg_emit_header(header, values, value_count, header_name);
+    jipg_emit_header(header, jipg_global_context.values, value_count, header_name);
 
     FILE *source;
     if (single_file) {
@@ -892,7 +938,8 @@ static int jipg_main(/* cli args */ int argc, char *argv[],
         }
     }
 
-    jipg_emit_source(source, values, value_count, single_file ? NULL : header_name);
+    jipg_emit_source(source, jipg_global_context.values, value_count,
+                     single_file ? NULL : header_name);
 
     if (single_file) {
         fprintf(source, "\n#endif  // ");
