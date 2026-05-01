@@ -11,4 +11,4 @@ PARSER(Shapes,
                       KV("x", FLOAT()),
                       KV("y", FLOAT()))))))
 
-JIPG_MAIN()
+JIPG_MAIN("--single-file", "--header=shapes_parser.h")

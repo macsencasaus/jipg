@@ -819,7 +819,32 @@ static void jipg_emit_source(FILE *source, Jipg_Value **values, size_t value_cou
     }
 }
 
-static int jipg_main(int argc, char *argv[]) {
+static void jipg_parse_arg(char *arg, char **header_name, char **source_name, bool *single_file) {
+    static const char *help_str = "--help";
+    static const char *header_str = "--header=";
+    static const char *source_str = "--source=";
+    static const char *single_file_str = "--single-file";
+
+    if (strncmp(arg, help_str, strlen(help_str)) == 0) {
+        printf(
+            "jipg.h - the single file JSON Parser Generator for C!\n"
+            "Command line options:\n"
+            "  --help                  Show this message and exit.\n"
+            "  --header=<header-file>  Path of generated header file.\n"
+            "  --source=<source-file>  Path of generated source file.\n"
+            "  --single-file           Generates single STB style header file.\n");
+        exit(0);
+    } else if (strncmp(arg, header_str, strlen(header_str)) == 0) {
+        *header_name = arg + strlen(header_str);
+    } else if (strncmp(arg, source_str, strlen(source_str)) == 0) {
+        *source_name = arg + strlen(source_str);
+    } else if (strncmp(arg, single_file_str, strlen(single_file_str)) == 0) {
+        *single_file = true;
+    }
+}
+
+static int jipg_main(/* cli args */ int argc, char *argv[],
+                     /* config args */ int cfg_argc, char *cfg_argv[]) {
     size_t value_count = jipg_global_context.parser_count;
     static Jipg_Value *values[JIPG_PARSER_CAP];
     for (size_t i = 0; i < value_count; ++i) {
@@ -835,28 +860,13 @@ static int jipg_main(int argc, char *argv[]) {
     char *source_name = "jsonparser.c";
     bool single_file = false;
 
-    for (size_t idx = 1; idx < (size_t)argc; ++idx) {
-        const char help_str[] = "--help";
-        const char header_str[] = "--header=";
-        const char source_str[] = "--source=";
-        const char single_file_str[] = "--single-file";
+    for (int i = 0; i < cfg_argc; ++i) {
+        if (!cfg_argv[i]) continue;
+        jipg_parse_arg(cfg_argv[i], &header_name, &source_name, &single_file);
+    }
 
-        if (strncmp(argv[idx], help_str, strlen(help_str)) == 0) {
-            printf(
-                "jipg.h - the single file JSON Parser Generator for C!\n"
-                "Command line options:\n"
-                "  --help                  Show this message and exit.\n"
-                "  --header=<header-file>  Path of generated header file.\n"
-                "  --source=<source-file>  Path of generated source file.\n"
-                "  --single-file           Generates single STB style header file.\n");
-            return 0;
-        } else if (strncmp(argv[idx], header_str, strlen(header_str)) == 0) {
-            header_name = argv[idx] + strlen(header_str);
-        } else if (strncmp(argv[idx], source_str, strlen(source_str)) == 0) {
-            source_name = argv[idx] + strlen(source_str);
-        } else if (strncmp(argv[idx], single_file_str, strlen(single_file_str)) == 0) {
-            single_file = true;
-        }
+    for (int i = 1; i < argc; ++i) {
+        jipg_parse_arg(argv[i], &header_name, &source_name, &single_file);
     }
 
     FILE *header = fopen(header_name, "w");
@@ -893,9 +903,10 @@ static int jipg_main(int argc, char *argv[]) {
     return 0;
 }
 
-#define JIPG_MAIN()                    \
-    int main(int argc, char *argv[]) { \
-        return jipg_main(argc, argv);  \
+#define JIPG_MAIN(...)                                                      \
+    int main(int argc, char *argv[]) {                                      \
+        char *args[] = {/* Stop GCC from complaining */ NULL, __VA_ARGS__}; \
+        return jipg_main(argc, argv, ARRAY_SIZE(args), args);               \
     }
 
 #endif  // JIPG_H

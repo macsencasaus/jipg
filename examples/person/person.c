@@ -7,7 +7,7 @@ static char *read_file_to_buffer(const char *filename, size_t *size_out);
 
 int main(void) {
     size_t file_size;
-    const char *json = read_file_to_buffer("person.json", &file_size);
+    char *json = read_file_to_buffer("person.json", &file_size);
 
     Person p = {0};
     if (!parse_Person(json, file_size, &p)) {
@@ -37,6 +37,7 @@ int main(void) {
     }
     printf("\n");
 
+    free(json);
     return 0;
 }
 
