@@ -85,10 +85,10 @@ typedef struct Jipg_Value Jipg_Value;
 struct Jipg_Value {
     Jipg_Value_Kind kind;
     const char *head;
+    char *mangled_name;
 
     union {
         struct {
-            char *struct_name;
             Jipg_Value *kv_head;
         } as_object;
 
@@ -99,14 +99,9 @@ struct Jipg_Value {
         } as_object_kv;
 
         struct {
-            char *struct_name;
             size_t cap;
             Jipg_Value *internal;
         } as_array;
-
-        struct {
-            const char *struct_name;
-        } as_parser_ref;
     };
 };
 
@@ -170,7 +165,7 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
         } break;
 
         case JIPG_KIND_PARSER_REF: {
-            value->as_parser_ref.struct_name = va_arg(args, char *);
+            value->head = va_arg(args, char *);
         } break;
 
         case JIPG_KIND_STRING:
@@ -268,26 +263,41 @@ static void jipg_generate_struct_names(Jipg_Value *value, const char *head_struc
 
     switch (value->kind) {
         case JIPG_KIND_OBJECT: {
-            struct_num = jipg_global_context.name_alloc++;
             fmt = "%s_object%zu";
-            name = &value->as_object.struct_name;
+            name = &value->mangled_name;
 
             Jipg_Value *kv = value->as_object.kv_head;
             for (; kv; kv = kv->as_object_kv.next)
                 jipg_generate_struct_names(kv->as_object_kv.value, head_struct_name);
         } break;
         case JIPG_KIND_ARRAY: {
-            struct_num = jipg_global_context.name_alloc++;
             fmt = "%s_array%zu";
-            name = &value->as_array.struct_name;
+            name = &value->mangled_name;
 
             jipg_generate_struct_names(value->as_array.internal, head_struct_name);
+        } break;
+        case JIPG_KIND_PARSER_REF: {
+            const char *ref_head = value->head;
+            for (size_t i = 0; i < jipg_global_context.parser_count; ++i) {
+                Jipg_Value *other = jipg_global_context.values[i];
+                if (!other || !other->head)
+                    continue;
+                if (strcmp(ref_head, other->head) == 0) {
+                    value->mangled_name = other->mangled_name;
+                    break;
+                }
+            }
+            if (!value->mangled_name) {
+                fprintf(stderr, "Use of undefined parser: %s\n", ref_head);
+                exit(1);
+            }
         } break;
         default: {
         }
     }
 
     if (name) {
+        struct_num = jipg_global_context.name_alloc++;
         JIPG_ASSERT(fmt);
         size_t n = CAST(size_t, snprintf(NULL, 0, fmt, head_struct_name, struct_num));
         *name = PTR_CAST(char *, realloc(NULL, n + 1));
@@ -299,21 +309,9 @@ static void jipg_generate_struct_names(Jipg_Value *value, const char *head_struc
 static const char *jipg_value_struct_name(const Jipg_Value *value) {
     switch (value->kind) {
         case JIPG_KIND_OBJECT:
-            return value->as_object.struct_name;
         case JIPG_KIND_ARRAY:
-            return value->as_array.struct_name;
-        case JIPG_KIND_PARSER_REF: {
-            const char *head_name = value->as_parser_ref.struct_name;
-            for (size_t i = 0; i < jipg_global_context.parser_count; ++i) {
-                Jipg_Value *value = jipg_global_context.values[i];
-                if (!value->head)
-                    continue;
-                if (strcmp(head_name, value->head) == 0)
-                    return jipg_value_struct_name(value);
-            }
-            fprintf(stderr, "Use of undefined parser: %s\n", head_name);
-            exit(1);
-        } break;
+        case JIPG_KIND_PARSER_REF:
+            return value->head ? value->head : value->mangled_name;
 
         case JIPG_KIND_OBJECT_KV:
         case JIPG_KIND_STRING:
@@ -326,8 +324,8 @@ static const char *jipg_value_struct_name(const Jipg_Value *value) {
     UNREACHABLE();
 }
 
-static const char *jipg_value_name(const Jipg_Value *value) {
-    const char *st = jipg_value_struct_name(value);
+static const char *jipg_value_type_name(const Jipg_Value *value) {
+    const char *st = value->mangled_name;
     if (st) return st;
     switch (value->kind) {
         case JIPG_KIND_STRING:
@@ -349,19 +347,20 @@ static const char *jipg_value_name(const Jipg_Value *value) {
     UNREACHABLE();
 }
 
-static void jipg_emit_field_type(FILE *header, Jipg_Value *value) {
+static void jipg_emit_field_type(FILE *header, const Jipg_Value *value) {
     switch (value->kind) {
         case JIPG_KIND_OBJECT_KV:
         case JIPG_KIND_VALUE_COUNT:
             UNREACHABLE();
 
-        case JIPG_KIND_OBJECT: {
-            JIPG_ASSERT(value->as_object.struct_name);
-            fprintf(header, "%s ", value->as_object.struct_name);
-        } break;
+        case JIPG_KIND_OBJECT:
         case JIPG_KIND_ARRAY: {
-            JIPG_ASSERT(value->as_array.struct_name);
-            fprintf(header, "%s ", value->as_array.struct_name);
+            JIPG_ASSERT(value->mangled_name);
+            fprintf(header, "%s ", value->mangled_name);
+        } break;
+        case JIPG_KIND_PARSER_REF: {
+            JIPG_ASSERT(value->head);
+            fprintf(header, "%s ", value->head);
         } break;
         case JIPG_KIND_STRING: {
             fprintf(header, "char *");
@@ -375,21 +374,18 @@ static void jipg_emit_field_type(FILE *header, Jipg_Value *value) {
         case JIPG_KIND_BOOL: {
             fprintf(header, "bool ");
         } break;
-        case JIPG_KIND_PARSER_REF: {
-            fprintf(header, "%s ", value->as_parser_ref.struct_name);
-        } break;
     }
 }
 
-static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
-    const char *name;
+static void jipg_emit_value_types(FILE *header, const Jipg_Value *value) {
     switch (value->kind) {
         case JIPG_KIND_OBJECT: {
             Jipg_Value *kv = value->as_object.kv_head;
             for (; kv; kv = kv->as_object_kv.next)
                 jipg_emit_value_types(header, kv->as_object_kv.value);
 
-            const char *struct_name = value->as_object.struct_name;
+            const char *struct_name = jipg_value_struct_name(value);
+            assert(struct_name);
 
             fprintf(header, "typedef struct {\n");
             kv = value->as_object.kv_head;
@@ -399,7 +395,6 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
                 fprintf(header, "%s;\n", kv->as_object_kv.key);
             }
             fprintf(header, "} %s;\n", struct_name);
-            name = struct_name;
 
             if (!value->head) fprintf(header, "\n");
         } break;
@@ -407,7 +402,9 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
         case JIPG_KIND_ARRAY: {
             Jipg_Value *internal = value->as_array.internal;
             jipg_emit_value_types(header, internal);
-            const char *struct_name = value->as_array.struct_name;
+
+            const char *struct_name = jipg_value_struct_name(value);
+            assert(struct_name);
 
             fprintf(header,
                     "typedef struct {\n"
@@ -418,7 +415,6 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
                     "*items;\n"
                     "} %s;\n",
                     struct_name);
-            name = struct_name;
 
             if (!value->head) fprintf(header, "\n");
         } break;
@@ -429,11 +425,9 @@ static void jipg_emit_value_types(FILE *header, Jipg_Value *value) {
         }
     }
 
-    if (value->head) {
-        fprintf(header, "\ntypedef %s %s;\n\n", name, value->head);
-        name = value->head;
-
-        fprintf(header, "bool parse_%s(const char *json, size_t json_length, %s *res);\n\n", name, name);
+    if (value->head && value->kind != JIPG_KIND_PARSER_REF) {
+        fprintf(header, "\nbool parse_%s(const char *json, size_t json_length, %s *res);\n\n",
+                value->head, value->head);
     }
 }
 
@@ -459,7 +453,7 @@ static void jipg_emit_header_impl_macro(FILE *header, const char *header_name) {
     fprintf(header, "_IMPLEMENTATION");
 }
 
-static void jipg_emit_header(FILE *header, Jipg_Value **values, size_t value_count, const char *header_name) {
+static void jipg_emit_header(FILE *header, Jipg_Value *const *values, size_t value_count, const char *header_name) {
     static const char *header_includes[] = {
         "<stdbool.h>",
         "<stddef.h>",
@@ -479,7 +473,7 @@ static void jipg_emit_header(FILE *header, Jipg_Value **values, size_t value_cou
     fprintf(header, "\n");
 
     for (size_t i = 0; i < value_count; ++i) {
-        Jipg_Value *value = values[i];
+        const Jipg_Value *value = values[i];
         jipg_emit_value_types(header, value);
     }
 
@@ -725,9 +719,9 @@ static void jipg_emit_helpers(FILE *source) {
             STR(JIPG_REALLOC));
 }
 
-static void jipg_emit_value_parser(FILE *source, Jipg_Value *value);
+static void jipg_emit_value_parser(FILE *source, const Jipg_Value *value);
 
-static void jipg_emit_object_parser(FILE *source, Jipg_Value *object) {
+static void jipg_emit_object_parser(FILE *source, const Jipg_Value *object) {
     Jipg_Value *kv = object->as_object.kv_head;
 
     for (; kv; kv = kv->as_object_kv.next) {
@@ -735,7 +729,8 @@ static void jipg_emit_object_parser(FILE *source, Jipg_Value *object) {
         jipg_emit_value_parser(source, value);
     }
 
-    const char *struct_name = object->as_object.struct_name;
+    const char *struct_name = jipg_value_struct_name(object);
+    const char *mangled_name = object->mangled_name;
 
     fprintf(source,
             "static inline bool parse_%s(Lexer *l, %s *res) {\n"
@@ -748,7 +743,7 @@ static void jipg_emit_object_parser(FILE *source, Jipg_Value *object) {
             "        tok = next_token(l);\n"
             "        if (tok.type != TOKEN_TYPE_COLON) return false;\n"
             "        switch (key_hash) {\n",
-            struct_name, struct_name);
+            mangled_name, struct_name);
 
     kv = object->as_object.kv_head;
     for (; kv; kv = kv->as_object_kv.next) {
@@ -763,7 +758,7 @@ static void jipg_emit_object_parser(FILE *source, Jipg_Value *object) {
         fprintf(source,
                 "                if (!parse_%s(l, &res->%s))\n"
                 "                    return false;\n",
-                jipg_value_name(value), key);
+                jipg_value_type_name(value), key);
 
         fprintf(source,
                 "            } break;\n");
@@ -779,10 +774,13 @@ static void jipg_emit_object_parser(FILE *source, Jipg_Value *object) {
             "}\n");
 }
 
-static void jipg_emit_array_parser(FILE *source, Jipg_Value *array) {
-    const char *struct_name = array->as_array.struct_name;
+static void jipg_emit_array_parser(FILE *source, const Jipg_Value *array) {
+    const char *struct_name = jipg_value_struct_name(array);
+    const char *mangled_name = array->mangled_name;
+
     Jipg_Value *internal = array->as_array.internal;
     jipg_emit_value_parser(source, internal);
+
     fprintf(source,
             "static inline bool parse_%s(Lexer *l, %s *res) {\n"
             "    Token lbracket = next_token(l);\n"
@@ -792,7 +790,7 @@ static void jipg_emit_array_parser(FILE *source, Jipg_Value *array) {
             "        Token tok = next_token(l);\n"
             "        if (tok.type == TOKEN_TYPE_RBRACKET) break;\n"
             "        if (tok.type != TOKEN_TYPE_COMMA) *l = save;\n",
-            struct_name, struct_name);
+            mangled_name, struct_name);
 
     if (array->as_array.cap) {
         size_t cap = array->as_array.cap;
@@ -826,10 +824,10 @@ static void jipg_emit_array_parser(FILE *source, Jipg_Value *array) {
             "    }\n"
             "    return true;\n"
             "}\n",
-            jipg_value_name(internal));
+            jipg_value_type_name(internal));
 }
 
-static void jipg_emit_value_parser(FILE *source, Jipg_Value *value) {
+static void jipg_emit_value_parser(FILE *source, const Jipg_Value *value) {
     switch (value->kind) {
         case JIPG_KIND_OBJECT: {
             jipg_emit_object_parser(source, value);
@@ -849,10 +847,12 @@ static void jipg_emit_value_parser(FILE *source, Jipg_Value *value) {
     }
 }
 
-static void jipg_emit_head_value_parser(FILE *source, Jipg_Value *value) {
+static void jipg_emit_head_value_parser(FILE *source, const Jipg_Value *value) {
     jipg_emit_value_parser(source, value);
 
-    const char *struct_name = jipg_value_struct_name(value);
+    const char *struct_name = value->head;
+    const char *mangled_name = value->mangled_name;
+
     JIPG_ASSERT(struct_name);
 
     fprintf(source,
@@ -861,7 +861,7 @@ static void jipg_emit_head_value_parser(FILE *source, Jipg_Value *value) {
             "    read_char(&l);\n"
             "    return parse_%s(&l, res);\n"
             "}\n",
-            value->head, value->head, struct_name);
+            struct_name, struct_name, mangled_name);
 }
 
 static void jipg_emit_source(FILE *source, Jipg_Value **values, size_t value_count, const char *header_name) {
