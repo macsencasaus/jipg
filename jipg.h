@@ -87,6 +87,10 @@ struct Jipg_Value {
     const char *head;
     char *mangled_name;
 
+    // Do not genereate public parsing function.
+    // Still emits type.
+    bool no_export;
+
     union {
         struct {
             Jipg_Value *kv_head;
@@ -106,8 +110,13 @@ struct Jipg_Value {
 };
 
 typedef struct {
+    bool no_export;
+} Jipg_Parser_Opts;
+
+typedef struct {
     const char *head_struct_name;
     Jipg_Value *(*value_gen)(void);
+    Jipg_Parser_Opts opts;
 } Jipg_Parser;
 
 typedef struct {
@@ -214,7 +223,7 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
 #define JIPG_FLOAT() JIPG_FLOAT_IMPL()
 #define JIPG_USE(NAME) JIPG_USE_IMPL(NAME)
 
-#define JIPG_PARSER(STRUCT_NAME, VALUE)                                                             \
+#define JIPG_PARSER(STRUCT_NAME, VALUE, ...)                                                        \
     static Jipg_Value *jipg_##STRUCT_NAME##_gen(void) {                                             \
         return VALUE;                                                                               \
     }                                                                                               \
@@ -224,8 +233,11 @@ static inline Jipg_Value *new_jipg_value(Jipg_Value_Kind kind, ...) {
         static_assert(__COUNTER__ < JIPG_PARSER_CAP, "Too many parsers, increase JIPG_PARSER_CAP"); \
         size_t idx = jipg_global_context.parser_count++;                                            \
         jipg_global_context.parsers[idx] =                                                          \
-            (Jipg_Parser){.head_struct_name = #STRUCT_NAME,                                         \
-                          .value_gen = jipg_##STRUCT_NAME##_gen};                                   \
+            (Jipg_Parser){                                                                          \
+                .head_struct_name = #STRUCT_NAME,                                                   \
+                .value_gen = jipg_##STRUCT_NAME##_gen,                                              \
+                .opts = (Jipg_Parser_Opts){__VA_ARGS__},                                            \
+            };                                                                                      \
     }
 
 #define JIPG_DESC(DESC)                                       \
@@ -396,7 +408,7 @@ static void jipg_emit_value_types(FILE *header, const Jipg_Value *value) {
             }
             fprintf(header, "} %s;\n", struct_name);
 
-            if (!value->head) fprintf(header, "\n");
+            if (!value->head || value->no_export) fprintf(header, "\n");
         } break;
 
         case JIPG_KIND_ARRAY: {
@@ -416,7 +428,7 @@ static void jipg_emit_value_types(FILE *header, const Jipg_Value *value) {
                     "} %s;\n",
                     struct_name);
 
-            if (!value->head) fprintf(header, "\n");
+            if (!value->head || value->no_export) fprintf(header, "\n");
         } break;
 
         // Does not generate types for primitives for now
@@ -425,7 +437,7 @@ static void jipg_emit_value_types(FILE *header, const Jipg_Value *value) {
         }
     }
 
-    if (value->head && value->kind != JIPG_KIND_PARSER_REF) {
+    if (value->head && value->kind != JIPG_KIND_PARSER_REF && !value->no_export) {
         fprintf(header, "\nbool parse_%s(const char *json, size_t json_length, %s *res);\n\n",
                 value->head, value->head);
     }
@@ -937,6 +949,7 @@ static int jipg_main(/* cli args */ int argc, const char *argv[],
         Jipg_Parser *parser = jipg_global_context.parsers + i;
         Jipg_Value *value = parser->value_gen();
         value->head = parser->head_struct_name;
+        value->no_export = parser->opts.no_export;
         jipg_generate_struct_names(value, parser->head_struct_name);
         jipg_global_context.values[i] = value;
     }
